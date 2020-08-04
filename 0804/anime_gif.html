@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>アニメーションGIF変換</title>
+<script src="LZWEncoder.js"></script>
+<script src="NeuQuant.js"></script>
+<script src="GIFEncoder.js"></script>
+<script src="b64.js"></script>
+<script>
+let encoder;
+let canvas, context;
+let video, output;
+let [width, height] = [200, 150];
+let cameraStream = null;
+let timer, interval = 100;
+
+const init = () => {
+    // エンコーダー（100ミリ間隔、ループ）
+    encoder = new GIFEncoder();
+    encoder.setDelay(interval);
+    encoder.setRepeat(0);
+    // キャンバスの取得
+    canvas = document.getElementById("videoCanvas");
+    context = canvas.getContext("2d");
+    // ビデオ
+    video = document.getElementById("video");
+    video.muted = true;
+    video.controls = true;
+    // 出力画像
+    output = document.getElementById("output");
+    // キャンバス、動画、出力画面のサイズをセット
+    setSize();
+    // ボタンの無効化
+    disabledButtons(true, true, true);
+}
+
+const setSource = () => {
+    // 動画ファイル／カメラの切り替え
+    if (document.getElementById("file").checked) {
+        // カメラの切断
+        if (cameraStream != null) {
+            cameraStream.getVideoTracks()[0].stop();
+            cameraStream = null;
+            video.srcObject = null;
+        }
+        document.getElementById("message").innerText = "未接続";
+    } else {
+        // カメラの接続
+        var media = navigator.mediaDevices.getUserMedia({
+            // 映像のみ（1280×720）
+            audio: false,
+            video: {
+                width: {ideal: 1280},
+                height: {ideal: 720}
+            }
+        }).then(function(stream) {
+            // カメラからの映像をビデオにセット
+            video.srcObject = stream;
+            video.autoplay = true;
+            cameraStream = stream;
+            document.getElementById("message").innerText = "接続";
+            // 開始ボタンの有効化
+            disabledButtons(false, true, true);
+        }).catch(function(error) {
+            // エラー
+            document.getElementById("message").innerText = error;
+        });
+    }
+}
+
+const loadVideo = files => {
+    // 動画ファイルをビデオにセット
+    videoFile = files[0];
+    video.src = URL.createObjectURL(videoFile);
+    video.autoplay = false;
+    video.onloadeddata = () => {
+        // 開始ボタンの有効化
+        disabledButtons(false, true, true);
+    }
+    video.onended = () => stopEncord();
+    document.getElementById("file").checked = true;
+}
+
+const setSize = () => {
+    // サイズの変更
+    width = document.getElementById("w").value;
+    height = document.getElementById("h").value;
+    [canvas.width, canvas.height] = [width, height];
+    [video.width, video.height] = [width, height];
+    [output.width, output.height] = [width, height];
+    encoder.setSize(width, height);
+}
+
+const startEncord = () => {
+    // エンコード開始
+    encoder.start();
+    video.play();
+    output.classList.add("hide");
+    timer = setInterval(addFrame, interval);
+    // 開始ボタンの無効化、停止ボタンの有効化
+    disabledButtons(true, false, true);
+}
+
+const addFrame = () => {
+    // フレームの追加
+    const [sw, sh] = [video.videoWidth, video.videoHeight];
+    let [dx, dy, dw, dh] = [0, 0, width, height];
+    if (sw > sh) {
+        //　横長
+        dh = dw * sh / sw;
+        dy = (height - dh) / 2;
+    } else {
+        // 縦長
+        dw = height * sw / sh;
+        dx = (width - dw) / 2;
+    }
+    context.fillStyle = "#FFFFFF";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(video, 0, 0, sw, sh, dx, dy, dw, dh);
+    encoder.addFrame(context);
+}
+
+const stopEncord = () => {
+    // エンコード終了
+    clearInterval(timer);
+    video.pause();
+    encoder.finish();
+    // アニメーションGIFの表示
+    const bin = encoder.stream().getData();
+    output.src = `data:image/gif;base64,${encode64(bin)}`;
+    output.classList.remove("hide");
+    // 開始ボタン、保存ボタンの有効化、停止ボタンの無効化
+    disabledButtons(false, true, false);
+}
+
+const saveGIF = () => {
+    // アニメーションGIFを名前を付けてつけて保存（ダウンロード）
+    const filename = window.prompt("ファイル名を入力してください", "video.gif");
+    if (filename != null) encoder.download(filename);
+}
+
+const disabledButtons = (start, stop, save) => {
+    // 開始ボタン、停止ボタン、保存ボタンの有効化／無効化
+    document.getElementById("start").disabled = start;
+    document.getElementById("stop").disabled = stop;
+    document.getElementById("save").disabled = save;
+}
+</script>
+<style>
+span {color: #CC0000;}
+input[type="number"] {width: 100px;}
+canvas {border: thin solid #CCCCCC;}
+img {border: 4px double #0000CC;}
+.hide {display: none;}
+</style>
+</head>
+<body onload="init()">
+<p>アニメーションGIF変換</p>
+<input type="radio" name="source" id="file" checked onchange="setSource()">
+動画：<input type="file" accept="video/*" onchange="loadVideo(this.files)">
+<input type="radio" name="source" id="camera" onchange="setSource()">
+カメラ：<span id="message">未接続</span>
+<hr>
+幅：<input type="number" id="w" value="200" onchange="setSize()">
+高さ：<input type="number" id="h" value="150" onchange="setSize()">
+<input type="button" id="start" value="変換開始" onclick="startEncord()">
+<input type="button" id="stop" value="変換停止" onclick="stopEncord()">
+<input type="button" id="save" value="保存" onclick="saveGIF()">
+<hr>
+<video id="video"></video>
+<canvas id="videoCanvas"></canvas>
+<img id="output" class="hide"></img>
+</body>
+</html>
